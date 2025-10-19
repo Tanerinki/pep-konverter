@@ -165,7 +165,9 @@ Set these in production:
 
 ## Deployment Notes
 
-- **Single Worker Configuration**: Application runs with single Gunicorn worker (important for cleanup leader election). If multiple workers are used, cleanup may not work properly due to race conditions in the lockfile-based leader election
+- **Single Worker Configuration**: Application must run with single Gunicorn worker for cleanup leader election to work correctly
+  - Running multiple workers will cause race conditions in the lockfile-based leader election
+  - This may result in cleanup not working properly or duplicate cleanup attempts
 - ProxyFix middleware configured for reverse proxy deployment
 - Static files (HTML) served with no-cache headers to ensure updates are visible
 - Download URLs do not have cache-busting to allow bookmarking

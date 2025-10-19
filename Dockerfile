@@ -45,8 +45,16 @@ EXPOSE 5000
 
 # --- Health check ---
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health').read()"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health', timeout=2).read()" || exit 1
 
 # --- Startbefehl ---
 # Single worker for file cleanup leader election
-CMD ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "--access-logfile", "-", "--error-logfile", "-", "app:app"]
+# Timeout settings: 120s for request processing, 30s for graceful shutdown
+CMD ["gunicorn", \
+     "--workers", "1", \
+     "--bind", "0.0.0.0:5000", \
+     "--timeout", "120", \
+     "--graceful-timeout", "30", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "app:app"]

@@ -17,7 +17,6 @@ ENV/
 *.swo
 
 # Application-specific
-/app/temp_files/
 temp_files/
 
 # OS

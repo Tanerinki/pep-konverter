@@ -113,12 +113,17 @@ def parse_pdf_for_events(pdf_bytes):
         List of events, each containing date and shift information
 
     Raises:
-        ValueError: If PDF is encrypted or invalid
+        ValueError: If PDF is encrypted, invalid, or too large
     """
     events = []
     with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
         if doc.is_encrypted:
             raise ValueError("PDF ist passwortgeschützt und kann nicht gelesen werden.")
+
+        # Limit page count to prevent resource exhaustion
+        if doc.page_count > 100:
+            raise ValueError("PDF hat zu viele Seiten (max. 100 Seiten).")
+
         for p in range(doc.page_count):
             page = doc[p]
             width = page.rect.width
@@ -177,6 +182,12 @@ def _to_dt(y, mo, d, h, mi):
     return datetime(int(y), int(mo), int(d), h, mi)
 
 
+def _escape_ics_text(text):
+    """Escape special characters for ICS format."""
+    # Escape backslashes first, then special chars
+    return text.replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;").replace("\n", "\\n")
+
+
 def create_ics(events, title):
     """
     Create an ICS calendar file from parsed events.
@@ -189,6 +200,7 @@ def create_ics(events, title):
         ICS file content as string
     """
     now_utc = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    safe_title = _escape_ics_text(title)
     rows = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -196,14 +208,19 @@ def create_ics(events, title):
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
         "X-WR-TIMEZONE:Europe/Berlin",
-        f"X-WR-CALNAME:{title}",
+        f"X-WR-CALNAME:{safe_title}",
         VTIMEZONE_BERLIN.strip()
     ]
 
     for e in events:
         d, s = e["date"], e["shift"]
-        start_dt = _to_dt(d["year"], d["month"], d["day"], s["start_h"], s["start_m"])
-        end_dt = _to_dt(d["year"], d["month"], d["day"], s["end_h"], s["end_m"])
+        try:
+            start_dt = _to_dt(d["year"], d["month"], d["day"], s["start_h"], s["start_m"])
+            end_dt = _to_dt(d["year"], d["month"], d["day"], s["end_h"], s["end_m"])
+        except (ValueError, TypeError) as exc:
+            logging.warning("Skipping invalid event date/time: %s", exc)
+            continue
+
         if end_dt <= start_dt:
             end_dt += timedelta(days=1)  # Handle midnight overflow
 
@@ -217,7 +234,7 @@ def create_ics(events, title):
             f"DTSTAMP:{now_utc}",
             f"DTSTART;TZID=Europe/Berlin:{dtstart}",
             f"DTEND;TZID=Europe/Berlin:{dtend}",
-            f"SUMMARY:{title}",
+            f"SUMMARY:{safe_title}",
             "SEQUENCE:0",
             "TRANSP:OPAQUE",
             "END:VEVENT"
@@ -227,17 +244,26 @@ def create_ics(events, title):
     return "\r\n".join(rows)
 
 
-# ----- Cache-Busting nur für HTML/API, NICHT für Downloads -----
+# ----- Security and Cache Headers -----
 @app.after_request
-def _no_store_for_ui(resp):
-    """Add cache-control headers for UI/API routes but not downloads."""
+def _security_and_cache_headers(resp):
+    """Add security and cache-control headers."""
     path = request.path or ""
+
+    # Cache control for UI/API routes (not downloads)
     if path == "/" or path.startswith("/api") or path.endswith(".html"):
         if not path.startswith("/downloads/"):
             resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             resp.headers["Pragma"] = "no-cache"
             resp.headers["Expires"] = "0"
             resp.headers["Surrogate-Control"] = "no-store"
+
+    # Security headers for all responses
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-XSS-Protection"] = "1; mode=block"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
     return resp
 
 
@@ -258,7 +284,10 @@ def convert_pdf():
     if not f or not f.filename.lower().endswith(".pdf"):
         return jsonify({"error": "Ungültige Datei. Bitte eine PDF hochladen."}), 400
 
+    # Validate and sanitize title
     title = (request.form.get("title") or "Arbeit (PEP)").strip() or "Arbeit (PEP)"
+    if len(title) > 200:
+        return jsonify({"error": "Titel ist zu lang (max. 200 Zeichen)."}), 400
     try:
         # Size is limited by MAX_CONTENT_LENGTH
         pdf = f.read()

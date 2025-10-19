@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PEP Konverter</title>
+
+  <!-- Favicon (inline SVG) -->
+  <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" ry="12" fill="%234f46e5"/><path fill="white" d="M18 16h4v8h-4zm24 0h4v8h-4zM14 26h36v22a6 6 0 0 1-6 6H20a6 6 0 0 1-6-6zM14 22a6 6 0 0 1 6-6h4v6h16v-6h4a6 6 0 0 1 6 6v4H14z"/></svg>' />
+
+  <!-- Tailwind & QRCode -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.0/build/qrcode.min.js" defer></script>
+
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root { --ring:#4f46e5; --grid:#d1d5db; }
+    html,body { height: 100%; }
+    /* Grundschrift explizit dunkel, dezente Spotlights */
+    body {
+      font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(79,70,229,.05), transparent 60%),
+        radial-gradient(900px 500px at 90% 0%, rgba(2,6,23,.05), transparent 50%),
+        #f8fafc;
+      color:#111827;
+    }
+    /* Nur bei Lade/Erfolg per JS zuschalten */
+    .status-hold { min-height: 280px; }
+    /* QR-Canvas vorab reservieren (verhindert Einrücken) */
+    #qrcode { width: 180px; height: 180px; display: block; }
+
+    /* Drop-Zone */
+    #drop-zone{
+      border:2px dashed #d1d5db; border-radius:0.75rem; transition:all .2s ease-in-out; cursor:pointer;
+      background-image: radial-gradient(circle at 1px 1px, var(--grid) 1px, transparent 0);
+      background-size: 1.25rem 1.25rem; background-position: 0 0;
+    }
+    #drop-zone:hover{ border-color:#6366f1; background-color:#f9fafb; transform:scale(1.01); }
+    #drop-zone.drag-over{ border-color:#4f46e5; background-color:#eef2ff; background-position: 18px 0; }
+
+    /* Loader */
+    .loader{
+      width:40px; height:40px; border-radius:9999px;
+      border:4px solid #e5e7eb; border-top-color:#4f46e5; animation:spin 1s linear infinite;
+    }
+    @keyframes spin{ to { transform: rotate(360deg); } }
+
+    /* Buttons */
+    .action-button{ transition: transform .15s ease, box-shadow .2s ease, background .2s ease; }
+    .action-button:hover{ transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+    .btn-primary { background: linear-gradient(180deg, #4f46e5, #4338ca); }
+    .btn-primary:hover { filter: brightness(1.05); }
+
+    .copy-button{ transition: background-color .15s ease; }
+    .kbd{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background:#f1f5f9; padding:.1rem .35rem; border-radius:.375rem; border:1px solid #e5e7eb; font-size:.875rem;
+    }
+
+    /* Success-Karte: schlanker Akzentstreifen links */
+    .success-card { position: relative; }
+    .success-card::before{
+      content:""; position:absolute; left:0; top:0; bottom:0; width:6px;
+      border-radius:0.75rem 0 0 0.75rem;
+      background: linear-gradient(180deg, rgba(34,197,94,.65), rgba(34,197,94,.2));
+    }
+
+    /* QR-„Polaroid“ mit ruhigem Halo */
+    .qr-polaroid{
+      position: relative; padding:10px; border-radius:.5rem; background:#fff;
+      border:1px solid #e5e7eb; box-shadow: 0 10px 30px rgba(2,6,23,.06);
+    }
+    .qr-polaroid::after{
+      content:""; position:absolute; inset:-10px; border-radius: inherit; z-index:-1;
+      background: radial-gradient(140px 140px at 50% 50%, rgba(79,70,229,.10), transparent 60%);
+    }
+
+    /* A11y Focus-Rings */
+    .focus-ring:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(79,70,229,.35); }
+
+    /* Weniger Bewegung bei System-Preference */
+    @media (prefers-reduced-motion: reduce){
+      * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-gray-900 min-h-screen flex items-center justify-center py-12">
+  <noscript>
+    <div class="max-w-xl mx-auto p-4 text-center text-red-700 bg-red-50 border border-red-200 rounded-xl">
+      Für dieses Tool wird JavaScript benötigt.
+    </div>
+  </noscript>
+
+  <!-- Main App -->
+  <main id="main-content" class="w-full max-w-2xl mx-auto p-4 sm:p-8">
+    <section class="bg-white/90 backdrop-blur-sm border border-gray-200/70 shadow-2xl rounded-2xl p-6 sm:p-10">
+      <header class="text-center mb-8">
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">PEP Konverter</h1>
+        <p class="text-gray-600 mt-2">Lade deinen <strong>Monatsplan</strong> (auch mehrseitig) als PDF hoch, um einen Kalender-Link zu erstellen.</p>
+      </header>
+
+      <!-- Optionen -->
+      <div id="options-container" class="mb-6">
+        <label for="custom-title" class="block text-sm font-medium text-gray-700">Optionaler Kalender-Titel</label>
+        <input id="custom-title" name="custom-title" type="text"
+               class="mt-1 block w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900"
+               value="Arbeit (PEP)" autocomplete="off" />
+        <p class="text-xs text-gray-500 mt-1">Tipp: „<span class="kbd">Arbeit (PEP)</span>“ eignet sich gut als Standard.</p>
+      </div>
+
+      <!-- Upload-Zone -->
+      <div id="upload-container">
+        <div id="drop-zone" class="relative flex flex-col items-center justify-center w-full p-8 sm:p-12 text-center">
+          <div class="p-4 bg-white/80 rounded-full shadow-md mb-4 pointer-events-none" aria-hidden="true">
+            <svg class="w-10 h-10 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+          </div>
+          <p class="text-gray-700 font-semibold pointer-events-none">PDF hierher ziehen</p>
+          <p class="text-sm text-gray-500 mt-1 pointer-events-none">oder zum Hochladen klicken</p>
+          <p id="file-name" class="text-sm text-indigo-700 font-medium mt-4" aria-live="polite"></p>
+          <p class="mt-3 text-xs text-gray-500">Max. 5&nbsp;MB • Nur PDF</p>
+        </div>
+        <input id="pdf-upload" type="file" class="hidden" accept=".pdf,application/pdf" />
+      </div>
+
+      <!-- Status -->
+      <div id="status-area" class="mt-6 text-center" aria-live="polite" aria-atomic="true"></div>
+
+      <!-- Datenschutz -->
+      <section id="privacy-notice" class="mt-8 pt-6 border-t border-gray-200 text-left">
+        <h3 class="text-lg font-semibold text-gray-800">Datenschutzhinweis</h3>
+        <ul class="mt-2 list-disc list-inside text-sm text-gray-600 space-y-1">
+          <li>Deine PDF wird ausschließlich zur Erstellung der Kalenderdatei verarbeitet.</li>
+          <li>Die generierte <code class="kbd">.ics</code> wird nach <strong>30&nbsp;Minuten</strong> automatisch gelöscht.</li>
+          <li>Es werden keine Inhalte dauerhaft gespeichert oder ausgewertet.</li>
+        </ul>
+      </section>
+    </section>
+
+    <footer class="text-center mt-6 text-sm text-gray-500">
+      <p>Privates Tool von <strong>Taner Akbulut</strong>.</p>
+      <p class="mt-1">Version: <span id="app-version" class="tabular-nums">lädt…</span></p>
+    </footer>
+  </main>
+
+  <!-- QR-Landing (mobil) -->
+  <section id="qr-landing-page" class="hidden w-full max-w-lg mx-auto p-4">
+    <div class="text-center p-8 bg-white rounded-2xl shadow-xl border border-gray-200">
+      <h1 class="text-2xl font-bold text-gray-900 mb-2">Fast geschafft!</h1>
+      <p class="text-gray-600 mb-6">Tippe auf den Button, um die Termine zu deinem Kalender hinzuzufügen.</p>
+      <a id="qr-download-link" href="#"
+         class="inline-flex items-center justify-center bg-indigo-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-indigo-700 action-button">
+        Termine hinzufügen
+      </a>
+      <p class="text-xs text-gray-500 mt-4">Der Link ist 30&nbsp;Minuten gültig.</p>
+    </div>
+  </section>
+
+  <script>
+    'use strict';
+
+    /* Clientseitiges Upload-Limit (Server hat eigenes Limit) */
+    const MAX_MB = 5;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initVersionLabel();
+      const params = new URLSearchParams(location.search);
+      const fileId = params.get('file_id');
+
+      if (fileId) {
+        // QR-Landing
+        document.getElementById('main-content').classList.add('hidden');
+        const qrPage = document.getElementById('qr-landing-page');
+        const link = document.getElementById('qr-download-link');
+        link.href = `/downloads/${encodeURIComponent(fileId)}`;
+        qrPage.classList.remove('hidden');
+      } else {
+        initUploader();
+      }
+    });
+
+    async function initVersionLabel() {
+      const el = document.getElementById('app-version');
+      try {
+        const r = await fetch('/api/version', { cache: 'no-store' });
+        if (!r.ok) throw new Error('status ' + r.status);
+        const js = await r.json();
+        el.textContent = js?.version ?? 'dev';
+      } catch {
+        el.textContent = 'unbekannt';
+      }
+    }
+
+    function initUploader() {
+      const dropZone = document.getElementById('drop-zone');
+      const fileInput = document.getElementById('pdf-upload');
+      const titleInput = document.getElementById('custom-title');
+      const statusArea = document.getElementById('status-area');
+      const fileNameDisplay = document.getElementById('file-name');
+      const uploadContainer = document.getElementById('upload-container');
+      const optionsContainer = document.getElementById('options-container');
+      const privacyNotice = document.getElementById('privacy-notice');
+
+      // Klick zum Öffnen des Filepickers
+      dropZone.addEventListener('click', () => fileInput.click());
+
+      // Drag&Drop-States
+      dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        const f = e.dataTransfer?.files?.[0];
+        if (f) handleFile(f);
+      });
+
+      // Filepicker
+      fileInput.addEventListener('change', () => {
+        const f = fileInput.files?.[0];
+        if (f) handleFile(f);
+      });
+
+      async function handleFile(file) {
+        // Basis-Validierung
+        const isPdf = file.type === 'application/pdf' || (file.name || '').toLowerCase().endsWith('.pdf');
+        if (!isPdf) return showError('Ungültige Datei. Bitte eine PDF hochladen.');
+
+        const maxBytes = MAX_MB * 1024 * 1024;
+        if (file.size > maxBytes) return showError(`Die Datei ist zu groß (max. ${MAX_MB} MB).`);
+
+        fileNameDisplay.textContent = `Ausgewählte Datei: ${file.name}`;
+        showLoading();
+
+        // Request vorbereiten
+        const form = new FormData();
+        form.append('file', file);
+        form.append('title', (titleInput.value || 'Arbeit (PEP)').trim());
+
+        try {
+          const res = await fetch('/api/convert', { method: 'POST', body: form });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const msg = data?.error || `Ein Serverfehler ist aufgetreten (Status: ${res.status}).`;
+            return showError(msg);
+          }
+          showSuccess(data);
+        } catch {
+          showError('Verbindung zum Server fehlgeschlagen. Bitte versuche es später erneut.');
+        }
+      }
+
+      function showLoading() {
+        statusArea.classList.add('status-hold');
+        uploadContainer.style.display = 'none';
+        optionsContainer.style.display = 'none';
+        privacyNotice.style.display = 'none';
+        statusArea.innerHTML = `
+          <div class="flex flex-col items-center justify-center py-6 text-gray-900">
+            <div class="loader" role="status" aria-label="Wird verarbeitet"></div>
+            <p class="text-indigo-600 mt-4">Datei wird verarbeitet…</p>
+          </div>`;
+      }
+
+      function showSuccess(data) {
+        statusArea.classList.add('status-hold');
+        const qrUrl = data?.qrCodeUrl;
+        const dlUrl = data?.directDownloadUrl;
+
+        statusArea.innerHTML = `
+          <div class="success-card bg-green-50 border border-green-200 p-4 rounded-xl text-left text-gray-900">
+            <div class="flex flex-col sm:flex-row sm:items-start gap-4">
+              <div class="hidden sm:block self-start" aria-hidden="true">
+                <svg class="h-8 w-8 text-green-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                </svg>
+              </div>
+              <div class="flex-1">
+                <p class="text-sm font-medium text-green-800">Konvertierung erfolgreich!</p>
+
+                <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div class="p-3 bg-white rounded-lg border border-green-100">
+                    <p class="font-semibold">Für iPhone & Android</p>
+                    <p class="text-xs text-gray-600 mt-1 mb-2">QR-Code mit dem Handy scannen.</p>
+                    <div class="qr-polaroid mx-auto">
+                      <canvas id="qrcode" class="border border-gray-200 rounded-md p-1" aria-label="QR-Code zum Kalender"></canvas>
+                    </div>
+                  </div>
+
+                  <div class="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <p class="font-semibold">Oder Link für den PC</p>
+                    <div class="mt-2 flex items-center gap-2">
+                      <a id="pc-link" class="font-medium underline break-all hover:text-gray-900 text-indigo-700 focus-ring"></a>
+                      <button id="copy-btn"
+                              class="copy-button p-1.5 rounded-md hover:bg-gray-200 focus-ring"
+                              title="Link kopieren" aria-label="Link kopieren">
+                        <svg class="w-4 h-4 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                        </svg>
+                      </button>
+                    </div>
+                    <p id="copy-feedback" class="text-xs text-indigo-600 mt-1 h-4" aria-live="polite"></p>
+                  </div>
+                </div>
+
+                <button type="button"
+                        class="mt-6 action-button btn-primary text-white font-semibold px-5 py-2.5 rounded-lg focus-ring"
+                        onclick="resetApp()">
+                  Neue Datei hochladen
+                </button>
+              </div>
+            </div>
+          </div>`;
+
+        // QR setzen (fixe Canvas-Fläche verhindert Einrücken)
+        if (typeof QRCode !== 'undefined' && qrUrl) {
+          try { QRCode.toCanvas(document.getElementById('qrcode'), qrUrl, { width: 180, margin: 2 }); } catch {}
+        }
+
+        // Link setzen
+        const pcLink = document.getElementById('pc-link');
+        if (pcLink && dlUrl) {
+          pcLink.href = dlUrl;
+          pcLink.textContent = dlUrl;
+        }
+
+        // Copy-Button
+        const copyBtn = document.getElementById('copy-btn');
+        const copyFeedback = document.getElementById('copy-feedback');
+        copyBtn?.addEventListener('click', async () => {
+          const text = pcLink?.href || '';
+          try {
+            if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(text);
+            } else {
+              const ta = document.createElement('textarea');
+              ta.value = text; document.body.appendChild(ta);
+              ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+            }
+            copyFeedback.textContent = 'Link kopiert!';
+          } catch {
+            copyFeedback.textContent = 'Kopieren fehlgeschlagen.';
+          }
+          setTimeout(() => (copyFeedback.textContent = ''), 2000);
+        });
+      }
+
+      function showError(message) {
+        statusArea.innerHTML = `
+          <div class="bg-red-50 border border-red-200 p-4 rounded-xl mb-4 text-left text-gray-900" role="alert">
+            <div class="flex items-start gap-3">
+              <svg class="h-5 w-5 text-red-600 mt-0.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"
+                   fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                      clip-rule="evenodd"/>
+              </svg>
+              <p class="text-sm font-medium text-red-800">${escapeHtml(message)}</p>
+            </div>
+          </div>`;
+        resetApp(true);
+      }
+
+      // App zurücksetzen
+      window.resetApp = function(isError = false) {
+        uploadContainer.style.display = 'block';
+        optionsContainer.style.display = 'block';
+        privacyNotice.style.display = 'block';
+        fileNameDisplay.textContent = '';
+        if (!isError) statusArea.innerHTML = '';
+        statusArea.classList.remove('status-hold');
+        fileInput.value = '';
+      };
+    }
+
+    // Simple HTML-Escaper für Fehlermeldungen
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+  </script>
+</body>
+</html>

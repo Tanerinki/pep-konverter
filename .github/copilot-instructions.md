@@ -132,9 +132,10 @@ docker run -p 5000:5000 pep-konverter
 
 Set these in production:
 - `APP_VERSION`: Version string displayed in UI
-- `UPLOAD_FOLDER`: Must be writable by the application
-- `FILE_LIFETIME_MINUTES`: Adjust based on usage patterns
-- `LOG_LEVEL`: Set to DEBUG for troubleshooting
+- `UPLOAD_FOLDER`: Must be writable by the application (default: `/app/temp_files`)
+- `FILE_LIFETIME_MINUTES`: Adjust based on usage patterns (default: 30)
+- `MAX_CONTENT_MB`: Maximum upload size in megabytes (default: 5)
+- `LOG_LEVEL`: Set to DEBUG for troubleshooting (default: INFO)
 
 ## Common Tasks
 
@@ -164,7 +165,7 @@ Set these in production:
 
 ## Deployment Notes
 
-- Application runs with single Gunicorn worker (important for cleanup leader election)
+- **Single Worker Configuration**: Application runs with single Gunicorn worker (important for cleanup leader election). If multiple workers are used, cleanup may not work properly due to race conditions in the lockfile-based leader election
 - ProxyFix middleware configured for reverse proxy deployment
 - Static files (HTML) served with no-cache headers to ensure updates are visible
 - Download URLs do not have cache-busting to allow bookmarking
